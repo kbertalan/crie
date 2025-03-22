@@ -1,0 +1,5 @@
+# ignore direnv folder for direnv users
+.direnv/
+
+# ignore go cache
+.go/
