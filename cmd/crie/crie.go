@@ -2,10 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"net/http"
+	"sync"
+	"time"
 
 	"github.com/kbertalan/crie/internal/config"
+	"github.com/kbertalan/crie/internal/invocation"
 	"github.com/kbertalan/crie/internal/process"
+	"github.com/kbertalan/crie/internal/server"
 	"github.com/kbertalan/crie/internal/terminator"
 )
 
@@ -23,17 +30,39 @@ func main() {
 }
 
 func emulate(cfg config.Config) {
-	// ctx, cancel := context.WithCancel(context.Background())
-	// var wg sync.WaitGroup
-	//
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+
+	invocationCh := make(chan invocation.Invocation, cfg.MaxConcurrency)
+
+	wg.Add(1)
+	go server.ListenAndServe(ctx, cfg, &wg, cancel, invocationCh)
+
+	go func() {
+		for inv := range invocationCh {
+			inv := inv
+			go func() {
+				log.Printf("[%s]: request", inv.ID)
+				time.Sleep(3 * time.Second)
+
+				inv.ResponseCh <- invocation.Response{
+					StatusCode: http.StatusInternalServerError,
+					Header: http.Header{
+						"content-type": []string{"application/json"},
+					},
+					Body:  []byte(fmt.Sprintf(`{"message": "error was indeed happening for request: %s"}%s`, inv.ID, "\n")),
+					Error: errors.New("error happened"),
+				}
+				close(inv.ResponseCh)
+			}()
+		}
+	}()
+
 	// wg.Add(1)
-	// go server.ListenAndServe(ctx, cfg, &wg)
-	//
-	// wg.Add(int(cfg.MaxConcurrency))
 	// go manager.Processes(ctx, cfg, &wg)
-	//
-	// terminator.Wait(ctx, cancel)
-	// wg.Wait()
+
+	terminator.Wait(ctx, cancel)
+	wg.Wait()
 }
 
 func delegate(cfg config.Config) {

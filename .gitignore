@@ -3,3 +3,6 @@
 
 # ignore go cache
 .go/
+
+tmp/
+crie

@@ -6,6 +6,14 @@ import (
 	"strconv"
 )
 
+func getEnv(key string, defaultValue string) string {
+	if value, found := os.LookupEnv(key); found {
+		return value
+	}
+
+	return defaultValue
+}
+
 func parseEnv[T any](key string, defaultValue T, parserFn func(string) (T, error)) (T, error) {
 	valueStr, found := os.LookupEnv(key)
 	if !found {

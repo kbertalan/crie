@@ -2,9 +2,8 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"strconv"
+	"time"
 )
 
 type ListenAddress string
@@ -17,15 +16,21 @@ type Config struct {
 	OriginalAWSLambdaRuntimeAPI string
 	MaxConcurrency              uint32
 	ServerAddress               ListenAddress
+	ServerShutdownTimeout       time.Duration
+	LambdaName                  string
 }
 
 const (
-	AWS_LAMBDA_RUNTIME_API = "AWS_LAMBDA_RUNTIME_API"
-	CRIE_MAX_CONCURRENCY   = "CRIE_MAX_CONCURRENCY"
-	CRIE_SERVER_ADDRESS    = "CRIE_SERVER_ADDRESS"
+	AWS_LAMBDA_RUNTIME_API       = "AWS_LAMBDA_RUNTIME_API"
+	CRIE_MAX_CONCURRENCY         = "CRIE_MAX_CONCURRENCY"
+	CRIE_SERVER_ADDRESS          = "CRIE_SERVER_ADDRESS"
+	CRIE_SERVER_SHUTDOWN_TIMEOUT = "CRIE_SERVER_SHUTDOWN_TIMEOUT"
+	CRIE_LAMBDA_NAME             = "CRIE_LAMBDA_NAME"
 
-	defaultMaxConcurrency uint32        = 2
-	defaultServerAddress  ListenAddress = ":10000"
+	defaultMaxConcurrency        uint32        = 2
+	defaultServerAddress         ListenAddress = ":10000"
+	defaultServerShutdownTimeout time.Duration = 10 * time.Second
+	defaultLambdaName                          = "function"
 )
 
 func Detect() (Config, error) {
@@ -42,15 +47,6 @@ func Detect() (Config, error) {
 
 	cfg.OriginalAWSLambdaRuntimeAPI, _ = os.LookupEnv(AWS_LAMBDA_RUNTIME_API)
 
-	cfg.MaxConcurrency = defaultMaxConcurrency
-	if maxConcurrencyStr, found := os.LookupEnv(CRIE_MAX_CONCURRENCY); found {
-		if maxConcurrency, err := strconv.ParseUint(maxConcurrencyStr, 10, 32); err != nil {
-			return cfg, fmt.Errorf("unable to parse %s: %w", CRIE_MAX_CONCURRENCY, err)
-		} else {
-			cfg.MaxConcurrency = uint32(maxConcurrency)
-		}
-	}
-
 	var err error
 	cfg.MaxConcurrency, err = parseEnvUint32(CRIE_MAX_CONCURRENCY, defaultMaxConcurrency)
 	if err != nil {
@@ -61,6 +57,13 @@ func Detect() (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+
+	cfg.ServerShutdownTimeout, err = parseEnv(CRIE_SERVER_SHUTDOWN_TIMEOUT, defaultServerShutdownTimeout, time.ParseDuration)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.LambdaName = getEnv(CRIE_LAMBDA_NAME, defaultLambdaName)
 
 	return cfg, nil
 }

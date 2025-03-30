@@ -27,6 +27,7 @@
             gotools
             go-tools
             gotests
+            gotestsum
             delve
             impl
             air
