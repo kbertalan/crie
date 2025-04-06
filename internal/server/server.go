@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/kbertalan/crie/internal/config"
 	"github.com/kbertalan/crie/internal/invocation"
@@ -20,6 +21,7 @@ func ListenAndServe(ctx context.Context, cfg config.Config, wg *sync.WaitGroup, 
 
 	handler.Handle(pattern, &invokeHandler{
 		invocationCh: invocationCh,
+		cfg:          cfg,
 	})
 
 	srv := http.Server{
@@ -46,6 +48,7 @@ func ListenAndServe(ctx context.Context, cfg config.Config, wg *sync.WaitGroup, 
 
 type invokeHandler struct {
 	invocationCh chan<- invocation.Invocation
+	cfg          config.Config
 }
 
 func (h *invokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +61,16 @@ func (h *invokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case h.invocationCh <- inv:
+
+	case <-time.After(h.cfg.WaitForQueueCapacity):
+		close(inv.ResponseCh)
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(fmt.Sprintf(`{"message":"invocation queue is full: %s"}%s`, inv.ID, "\n")))
+		return
+
 	case <-r.Context().Done():
+		close(inv.ResponseCh)
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 

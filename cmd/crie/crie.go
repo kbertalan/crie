@@ -11,7 +11,6 @@ import (
 	"github.com/kbertalan/crie/internal/config"
 	"github.com/kbertalan/crie/internal/invocation"
 	"github.com/kbertalan/crie/internal/process"
-	"github.com/kbertalan/crie/internal/queue"
 	"github.com/kbertalan/crie/internal/server"
 	"github.com/kbertalan/crie/internal/terminator"
 )
@@ -33,12 +32,10 @@ func emulate(cfg config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
-	invocationCh := make(chan invocation.Invocation)
+	invocationCh := make(chan invocation.Invocation, cfg.QueueSize)
 
 	wg.Add(1)
 	go server.ListenAndServe(ctx, cfg, &wg, cancel, invocationCh)
-
-	queuedInvocationCh := queue.Start(ctx, cfg, invocationCh)
 
 	for range 2 {
 		go func() {
@@ -46,7 +43,7 @@ func emulate(cfg config.Config) {
 				select {
 				case <-ctx.Done():
 					return
-				case inv, ok := <-queuedInvocationCh:
+				case inv, ok := <-invocationCh:
 					if !ok {
 						return
 					}
@@ -72,6 +69,9 @@ func emulate(cfg config.Config) {
 
 	terminator.Wait(ctx, cancel)
 	log.Println("shutting down started")
+
+	go cleanupPendingInvocations(invocationCh)
+
 	wg.Wait()
 	log.Println("shutting down completed")
 }
@@ -80,4 +80,18 @@ func delegate(cfg config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
 	process.Run(ctx, cfg, cancel)
 	terminator.Wait(ctx, cancel)
+}
+
+func cleanupPendingInvocations(invocationCh <-chan invocation.Invocation) {
+	for inv := range invocationCh {
+		inv.ResponseCh <- invocation.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header: http.Header{
+				"content-type": []string{"application/json"},
+			},
+			Body:  []byte(fmt.Sprintf(`{"message": "server shutdown"}%s`, "\n")),
+			Error: nil,
+		}
+		close(inv.ResponseCh)
+	}
 }
