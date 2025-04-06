@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"github.com/kbertalan/crie/internal/config"
 	"github.com/kbertalan/crie/internal/invocation"
 	"github.com/kbertalan/crie/internal/process"
+	"github.com/kbertalan/crie/internal/queue"
 	"github.com/kbertalan/crie/internal/server"
 	"github.com/kbertalan/crie/internal/terminator"
 )
@@ -33,36 +33,47 @@ func emulate(cfg config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
-	invocationCh := make(chan invocation.Invocation, cfg.MaxConcurrency)
+	invocationCh := make(chan invocation.Invocation)
 
 	wg.Add(1)
 	go server.ListenAndServe(ctx, cfg, &wg, cancel, invocationCh)
 
-	go func() {
-		for inv := range invocationCh {
-			inv := inv
-			go func() {
-				log.Printf("[%s]: request", inv.ID)
-				time.Sleep(3 * time.Second)
+	queuedInvocationCh := queue.Start(ctx, cfg, invocationCh)
 
-				inv.ResponseCh <- invocation.Response{
-					StatusCode: http.StatusInternalServerError,
-					Header: http.Header{
-						"content-type": []string{"application/json"},
-					},
-					Body:  []byte(fmt.Sprintf(`{"message": "error was indeed happening for request: %s"}%s`, inv.ID, "\n")),
-					Error: errors.New("error happened"),
+	for range 2 {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case inv, ok := <-queuedInvocationCh:
+					if !ok {
+						return
+					}
+					log.Printf("[%s]: request", inv.ID)
+					time.Sleep(3 * time.Second)
+
+					inv.ResponseCh <- invocation.Response{
+						StatusCode: http.StatusOK,
+						Header: http.Header{
+							"content-type": []string{"application/json"},
+						},
+						Body:  []byte(fmt.Sprintf(`{"message": "ok: %s"}%s`, inv.ID, "\n")),
+						Error: nil,
+					}
+					close(inv.ResponseCh)
 				}
-				close(inv.ResponseCh)
-			}()
-		}
-	}()
+			}
+		}()
+	}
 
 	// wg.Add(1)
 	// go manager.Processes(ctx, cfg, &wg)
 
 	terminator.Wait(ctx, cancel)
+	log.Println("shutting down started")
 	wg.Wait()
+	log.Println("shutting down completed")
 }
 
 func delegate(cfg config.Config) {

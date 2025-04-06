@@ -3,6 +3,7 @@
 go build -o crie ./cmd/crie/crie.go
 
 export CRIE_LAMBDA_NAME='my-function'
+export CRIE_QUEUE_SIZE=2
 ./crie sh -c 'echo "dummy command"' &
 pid=$!
 
@@ -14,7 +15,13 @@ function call() {
 
 call &
 call &
-call
+call &
+call &
+call &
+
+sleep 1
 
 echo
 kill $pid
+
+sleep 12

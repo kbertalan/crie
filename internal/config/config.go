@@ -15,6 +15,7 @@ type Config struct {
 	OriginalEnvironment         []string
 	OriginalAWSLambdaRuntimeAPI string
 	MaxConcurrency              uint32
+	QueueSize                   int
 	ServerAddress               ListenAddress
 	ServerShutdownTimeout       time.Duration
 	LambdaName                  string
@@ -23,11 +24,13 @@ type Config struct {
 const (
 	AWS_LAMBDA_RUNTIME_API       = "AWS_LAMBDA_RUNTIME_API"
 	CRIE_MAX_CONCURRENCY         = "CRIE_MAX_CONCURRENCY"
+	CRIE_QUEUE_SIZE              = "CRIE_QUEUE_SIZE"
 	CRIE_SERVER_ADDRESS          = "CRIE_SERVER_ADDRESS"
 	CRIE_SERVER_SHUTDOWN_TIMEOUT = "CRIE_SERVER_SHUTDOWN_TIMEOUT"
 	CRIE_LAMBDA_NAME             = "CRIE_LAMBDA_NAME"
 
 	defaultMaxConcurrency        uint32        = 2
+	defaultQueueSize             int           = 1024
 	defaultServerAddress         ListenAddress = ":10000"
 	defaultServerShutdownTimeout time.Duration = 10 * time.Second
 	defaultLambdaName                          = "function"
@@ -49,6 +52,11 @@ func Detect() (Config, error) {
 
 	var err error
 	cfg.MaxConcurrency, err = parseEnvUint32(CRIE_MAX_CONCURRENCY, defaultMaxConcurrency)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.QueueSize, err = parseEnvInt(CRIE_QUEUE_SIZE, defaultQueueSize)
 	if err != nil {
 		return cfg, err
 	}
