@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-type ListenAddress string
-
 type Config struct {
 	ProgramName                 string
 	CommandName                 string
@@ -15,28 +13,37 @@ type Config struct {
 	OriginalEnvironment         []string
 	OriginalAWSLambdaRuntimeAPI string
 	MaxConcurrency              uint32
+	InitialConcurrency          uint32
 	QueueSize                   int
 	WaitForQueueCapacity        time.Duration
 	ServerAddress               ListenAddress
 	ServerShutdownTimeout       time.Duration
 	LambdaName                  string
+	MaxHandleAttempts           uint32
+	DelayBetweenHandleAttempts  time.Duration
 }
 
 const (
-	AWS_LAMBDA_RUNTIME_API       = "AWS_LAMBDA_RUNTIME_API"
-	CRIE_MAX_CONCURRENCY         = "CRIE_MAX_CONCURRENCY"
-	CRIE_QUEUE_SIZE              = "CRIE_QUEUE_SIZE"
-	CRIE_WAIT_FOR_QUEUE_CAPACITY = "CRIE_WAIT_FOR_QUEUE_CAPACITY"
-	CRIE_SERVER_ADDRESS          = "CRIE_SERVER_ADDRESS"
-	CRIE_SERVER_SHUTDOWN_TIMEOUT = "CRIE_SERVER_SHUTDOWN_TIMEOUT"
-	CRIE_LAMBDA_NAME             = "CRIE_LAMBDA_NAME"
+	AWS_LAMBDA_RUNTIME_API             = "AWS_LAMBDA_RUNTIME_API"
+	CRIE_MAX_CONCURRENCY               = "CRIE_MAX_CONCURRENCY"
+	CRIE_INITIAL_CONCURRENCY           = "CRIE_INITIAL_CONCURRENCY"
+	CRIE_QUEUE_SIZE                    = "CRIE_QUEUE_SIZE"
+	CRIE_WAIT_FOR_QUEUE_CAPACITY       = "CRIE_WAIT_FOR_QUEUE_CAPACITY"
+	CRIE_SERVER_ADDRESS                = "CRIE_SERVER_ADDRESS"
+	CRIE_SERVER_SHUTDOWN_TIMEOUT       = "CRIE_SERVER_SHUTDOWN_TIMEOUT"
+	CRIE_LAMBDA_NAME                   = "CRIE_LAMBDA_NAME"
+	CRIE_MAX_HANDLE_ATTEMPTS           = "CRIE_MAX_HANDLE_ATTEMPTS"
+	CRIE_DELAY_BETWEEN_HANDLE_ATTEMPTS = "CRIE_DELAY_BETWEEN_HANDLE_ATTEMPTS"
 
-	defaultMaxConcurrency        uint32        = 2
-	defaultQueueSize             int           = 1000
-	defaultWaitForQueueCapacity  time.Duration = 100 * time.Millisecond
-	defaultServerAddress         ListenAddress = ":10000"
-	defaultServerShutdownTimeout time.Duration = 10 * time.Second
-	defaultLambdaName                          = "function"
+	defaultMaxConcurrency             uint32        = 2
+	defaultInitialConcurrency         uint32        = 1
+	defaultQueueSize                  int           = 1000
+	defaultWaitForQueueCapacity       time.Duration = 100 * time.Millisecond
+	defaultServerAddress              ListenAddress = ":10000"
+	defaultServerShutdownTimeout      time.Duration = 10 * time.Second
+	defaultLambdaName                               = "function"
+	defaultMaxHandleAttempts          uint32        = 100
+	defaultDelayBetweenHandleAttempts time.Duration = 100 * time.Millisecond
 )
 
 func Detect() (Config, error) {
@@ -55,6 +62,11 @@ func Detect() (Config, error) {
 
 	var err error
 	cfg.MaxConcurrency, err = parseEnvUint32(CRIE_MAX_CONCURRENCY, defaultMaxConcurrency)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.InitialConcurrency, err = parseEnvUint32(CRIE_INITIAL_CONCURRENCY, defaultInitialConcurrency)
 	if err != nil {
 		return cfg, err
 	}
@@ -80,6 +92,16 @@ func Detect() (Config, error) {
 	}
 
 	cfg.LambdaName = getEnv(CRIE_LAMBDA_NAME, defaultLambdaName)
+
+	cfg.MaxHandleAttempts, err = parseEnvUint32(CRIE_MAX_HANDLE_ATTEMPTS, defaultMaxHandleAttempts)
+	if err != nil {
+		return cfg, err
+	}
+
+	cfg.DelayBetweenHandleAttempts, err = parseEnv(CRIE_DELAY_BETWEEN_HANDLE_ATTEMPTS, defaultDelayBetweenHandleAttempts, time.ParseDuration)
+	if err != nil {
+		return cfg, err
+	}
 
 	return cfg, nil
 }

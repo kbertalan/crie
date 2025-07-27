@@ -6,10 +6,10 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/kbertalan/crie/internal/config"
 	"github.com/kbertalan/crie/internal/invocation"
+	"github.com/kbertalan/crie/internal/manager"
 	"github.com/kbertalan/crie/internal/process"
 	"github.com/kbertalan/crie/internal/server"
 	"github.com/kbertalan/crie/internal/terminator"
@@ -37,35 +37,16 @@ func emulate(cfg config.Config) {
 	wg.Add(1)
 	go server.ListenAndServe(ctx, cfg, &wg, cancel, invocationCh)
 
-	for range 2 {
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case inv, ok := <-invocationCh:
-					if !ok {
-						return
-					}
-					log.Printf("[%s]: request", inv.ID)
-					time.Sleep(3 * time.Second)
-
-					inv.ResponseCh <- invocation.Response{
-						StatusCode: http.StatusOK,
-						Header: http.Header{
-							"content-type": []string{"application/json"},
-						},
-						Body:  []byte(fmt.Sprintf(`{"message": "ok: %s"}%s`, inv.ID, "\n")),
-						Error: nil,
-					}
-					close(inv.ResponseCh)
-				}
-			}
-		}()
+	processCfgs := make([]manager.ProcessConfig, cfg.MaxConcurrency)
+	for i := range cfg.MaxConcurrency {
+		processCfgs[i] = manager.ProcessConfig{
+			ID:    fmt.Sprintf("pid-%d", i+1),
+			Start: i < cfg.InitialConcurrency,
+		}
 	}
 
-	// wg.Add(1)
-	// go manager.Processes(ctx, cfg, &wg)
+	wg.Add(1)
+	go manager.Processes(ctx, cfg, processCfgs, invocationCh, &wg)
 
 	terminator.Wait(ctx, cancel)
 	log.Println("shutting down started")
@@ -84,14 +65,7 @@ func delegate(cfg config.Config) {
 
 func cleanupPendingInvocations(invocationCh <-chan invocation.Invocation) {
 	for inv := range invocationCh {
-		inv.ResponseCh <- invocation.Response{
-			StatusCode: http.StatusInternalServerError,
-			Header: http.Header{
-				"content-type": []string{"application/json"},
-			},
-			Body:  []byte(fmt.Sprintf(`{"message": "server shutdown"}%s`, "\n")),
-			Error: nil,
-		}
+		inv.ResponseCh <- invocation.ResponseMessage(http.StatusInternalServerError, "server shutdown")
 		close(inv.ResponseCh)
 	}
 }

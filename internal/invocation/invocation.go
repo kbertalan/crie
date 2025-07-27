@@ -1,6 +1,8 @@
 package invocation
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -57,4 +59,35 @@ func (i *Invocation) Close() error {
 	close(i.ResponseCh)
 
 	return nil
+}
+
+func ResponseJSON(status int, value any) Response {
+	buffer, err := json.Marshal(value)
+	if err != nil {
+		resp := ResponseMessage(http.StatusInternalServerError, "could not convert object to json: %+v", err)
+		resp.Error = err
+
+		return resp
+	}
+
+	return Response{
+		StatusCode: status,
+		Header: http.Header{
+			"content-type": []string{"application/json"},
+		},
+		Body:  buffer,
+		Error: nil,
+	}
+}
+
+func ResponseMessage(status int, format string, args ...any) Response {
+	formatted := fmt.Sprintf(format, args...)
+	return Response{
+		StatusCode: status,
+		Header: http.Header{
+			"content-type": []string{"application/json"},
+		},
+		Body:  []byte(fmt.Sprintf(`{"message": "%s"}%s`, formatted, "\n")),
+		Error: nil,
+	}
 }
