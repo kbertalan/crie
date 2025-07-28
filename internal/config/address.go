@@ -21,3 +21,12 @@ func (a ListenAddress) ProcessAddress(i int) ListenAddress {
 
 	return ListenAddress(fmt.Sprintf(":%d", port+i+1))
 }
+
+func (a ListenAddress) AwsLambdaRuntimeAPI() string {
+	_, portStr, err := net.SplitHostPort(string(a))
+	if err != nil {
+		panic(fmt.Sprintf("could not extract host and port from %s", a))
+	}
+
+	return fmt.Sprintf("localhost:%s", portStr)
+}

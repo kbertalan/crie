@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 
+(cd ./test/echo; go build -o ../../echo-lambda main.go)
 go build -o crie ./cmd/crie/crie.go
 
 export CRIE_LAMBDA_NAME='my-function'
 export CRIE_QUEUE_SIZE=2
-./crie sh -c 'echo "dummy command"' &
+./crie ./echo-lambda &
 pid=$!
 
 sleep 0.5

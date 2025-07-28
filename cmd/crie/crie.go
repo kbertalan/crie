@@ -59,7 +59,7 @@ func emulate(cfg config.Config) {
 
 func delegate(cfg config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
-	process.Run(ctx, cfg, cancel)
+	process.Delegate(ctx, cfg, cancel)
 	terminator.Wait(ctx, cancel)
 }
 
