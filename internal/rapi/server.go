@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/kbertalan/crie/internal/config"
 	"github.com/kbertalan/crie/internal/invocation"
@@ -21,8 +22,10 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	mu  sync.Mutex
-	cfg ServerConfig
+	mu     sync.Mutex
+	ctx    context.Context
+	cancel context.CancelFunc
+	cfg    ServerConfig
 
 	srv   *http.Server
 	state serverState
@@ -80,6 +83,10 @@ func (s *Server) Start() {
 		IdleTimeout:                  0,
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	s.ctx = ctx
+	s.cancel = cancel
+
 	go func() {
 		err := s.srv.ListenAndServe()
 		if err == nil {
@@ -93,6 +100,9 @@ func (s *Server) Start() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
+		s.cancel()
+		s.sendInvocationError(http.StatusInternalServerError, "unknown error")
+
 		s.srv = nil
 		s.state = stopped
 		s.inv = nil
@@ -104,17 +114,27 @@ func (s *Server) Start() {
 
 func (s *Server) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if s.srv == nil || s.state == stopped {
 		return
 	}
+
+	s.cancel()
+	s.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Config.ServerShutdownTimeout)
 	defer cancel()
 	err := s.srv.Shutdown(ctx)
 	if err != nil {
 		log.Printf("[%s] rapi.server shutdown returned error: %+v", s.cfg.ID, err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.inv != nil {
+		log.Printf("[%s] rapi.server had a pending invocation [%s], sending error", s.cfg.ID, s.inv.ID)
+		s.sendInvocationError(http.StatusInternalServerError, "server shutdown")
 	}
 
 	s.srv = nil
@@ -136,10 +156,22 @@ func (s *Server) Next(inv invocation.Invocation) error {
 	return <-s.errCh
 }
 
+func (s *Server) sendInvocationError(status int, format string, args ...any) {
+	if s.inv == nil {
+		return
+	}
+
+	s.inv.ResponseCh <- invocation.ResponseMessage(status, format, args...)
+	close(s.inv.ResponseCh)
+}
+
 func (s *Server) serveNext(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	select {
 	case <-ctx.Done():
+		return
+	case <-s.ctx.Done():
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	case _, ok := <-s.ch:
 		if !ok {
@@ -153,6 +185,10 @@ func (s *Server) serveNext(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusOK)
 		w.Write(s.inv.Request.Body)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		log.Printf("[%s] sent next request [%s]", s.cfg.ID, s.inv.ID)
 	}
 }
 
@@ -178,7 +214,7 @@ func (s *Server) prepareLambdaHeaders(target http.Header) {
 	target.Add(LambdaRuntimeAwsRequestID, s.inv.ID.String())
 
 	target.Del(LambdaRuntimeDeadlineMs)
-	target.Add(LambdaRuntimeDeadlineMs, strconv.Itoa(int(s.cfg.Config.LambdaRuntimeDeadline.Milliseconds())))
+	target.Add(LambdaRuntimeDeadlineMs, strconv.FormatInt(time.Now().Add(s.cfg.Config.LambdaRuntimeDeadline).UnixMilli(), 10))
 
 	target.Del(LambdaRuntimeInvokedFunctionArn)
 	target.Add(LambdaRuntimeInvokedFunctionArn, s.cfg.Config.LambdaRuntimeInvokedFunctionArn)
@@ -195,14 +231,14 @@ func (s *Server) prepareLambdaHeaders(target http.Header) {
 
 func (s *Server) serveInitializationError(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("initialization error: %s", string(body))
-	w.WriteHeader(http.StatusOK)
+	log.Printf("[%s] initialization error: %s", s.cfg.ID, string(body))
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("server invocation error: %s", string(body))
-	w.WriteHeader(http.StatusOK)
+	log.Printf("[%s] server invocation error [%s]: %s", s.cfg.ID, s.inv.ID, string(body))
+	w.WriteHeader(http.StatusAccepted)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -214,8 +250,8 @@ func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveInvocationResponse(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("server invocation response: %s", string(body))
-	w.WriteHeader(http.StatusOK)
+	log.Printf("[%s] server invocation response [%s]: %s", s.cfg.ID, s.inv.ID, string(body))
+	w.WriteHeader(http.StatusAccepted)
 
 	s.inv.ResponseCh <- invocation.Response{
 		StatusCode: http.StatusOK,

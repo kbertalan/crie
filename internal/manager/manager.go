@@ -4,12 +4,12 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/kbertalan/crie/internal/config"
 	"github.com/kbertalan/crie/internal/invocation"
+	"github.com/kbertalan/crie/internal/process"
 	"github.com/kbertalan/crie/internal/rapi"
 )
 
@@ -29,13 +29,15 @@ func Processes(ctx context.Context, cfg config.Config, processCfgs []ProcessConf
 
 	processes := make([]*managedProcess, 0, len(processCfgs))
 	for i, processCfg := range processCfgs {
+		address := cfg.ServerAddress.ProcessAddress(i)
 		p := managedProcess{
 			id: processCfg.ID,
 			rapi: rapi.NewServer(rapi.ServerConfig{
 				Config:  cfg,
 				ID:      processCfg.ID,
-				Address: cfg.ServerAddress.ProcessAddress(i),
+				Address: address,
 			}),
+			proc: process.NewProcess(processCfg.ID, cfg, address),
 		}
 
 		if processCfg.Start {
@@ -103,7 +105,7 @@ type managedProcess struct {
 	mu     sync.Mutex
 	id     string
 	rapi   *rapi.Server
-	cmd    *exec.Cmd
+	proc   *process.Process
 	status managedProcessStatus
 }
 
@@ -117,12 +119,14 @@ const (
 func (p *managedProcess) Start() {
 	log.Printf("[%s] starting", p.id)
 	p.rapi.Start()
+	p.proc.Start()
 }
 
 func (p *managedProcess) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.rapi.Stop()
+	p.proc.Stop()
 }
 
 func (p *managedProcess) TryHandle(ctx context.Context, inv invocation.Invocation) bool {
@@ -137,6 +141,7 @@ func (p *managedProcess) TryHandle(ctx context.Context, inv invocation.Invocatio
 
 	go func() {
 		p.rapi.Start()
+		p.proc.Start()
 		err := p.rapi.Next(inv)
 		if err != nil {
 			log.Printf("[%s] invocation [%s] returned error: %+v", p.id, inv.ID, err)
