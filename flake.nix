@@ -31,6 +31,9 @@
             delve
             impl
             air
+
+            # aws
+            awscli2
           ];
 
           shellHook = ''

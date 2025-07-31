@@ -150,10 +150,7 @@ func (p *managedProcess) TryHandle(ctx context.Context, inv invocation.Invocatio
 
 	go func() {
 		p.Start()
-		err := p.rapi.Next(inv)
-		if err != nil {
-			log.Printf("[%s] invocation [%s] returned error: %+v", p.id, inv.ID, err)
-		}
+		p.rapi.Next(inv)
 
 		p.mu.Lock()
 		defer p.mu.Unlock()

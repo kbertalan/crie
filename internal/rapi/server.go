@@ -24,11 +24,11 @@ type Server struct {
 	cfg  config.Config
 	rapi config.ListenAddress
 
-	srv   *http.Server
-	state serverState
-	ch    chan struct{}
-	inv   *invocation.Invocation
-	errCh chan error
+	srv    *http.Server
+	state  serverState
+	inv    *invocation.Invocation
+	nextCh chan struct{}
+	doneCh chan struct{}
 }
 
 type serverState int
@@ -50,11 +50,11 @@ const (
 
 func NewServer(id string, cfg config.Config, rapi config.ListenAddress) *Server {
 	return &Server{
-		id:    id,
-		cfg:   cfg,
-		rapi:  rapi,
-		ch:    make(chan struct{}, 1),
-		errCh: make(chan error, 1),
+		id:     id,
+		cfg:    cfg,
+		rapi:   rapi,
+		nextCh: make(chan struct{}, 1),
+		doneCh: make(chan struct{}, 1),
 	}
 }
 
@@ -139,20 +139,20 @@ func (s *Server) Stop() {
 	s.srv = nil
 	s.state = stopped
 	s.inv = nil
-	close(s.ch)
-	close(s.errCh)
+	close(s.nextCh)
+	close(s.doneCh)
 
 	log.Printf("[%s] rapi.server stopped", s.id)
 }
 
-func (s *Server) Next(inv invocation.Invocation) error {
+func (s *Server) Next(inv invocation.Invocation) {
 	s.mu.Lock()
 	s.state = busy
 	s.inv = &inv
-	s.ch <- struct{}{}
+	s.nextCh <- struct{}{}
 	s.mu.Unlock()
 
-	return <-s.errCh
+	<-s.doneCh
 }
 
 func (s *Server) sendInvocationError(status int, format string, args ...any) {
@@ -172,7 +172,7 @@ func (s *Server) serveNext(w http.ResponseWriter, r *http.Request) {
 	case <-s.ctx.Done():
 		w.WriteHeader(http.StatusInternalServerError)
 		return
-	case _, ok := <-s.ch:
+	case _, ok := <-s.nextCh:
 		if !ok {
 			sender.SendMessage(w, http.StatusNotFound, "no more invocations")
 			return
@@ -236,20 +236,26 @@ func (s *Server) serveInitializationError(w http.ResponseWriter, r *http.Request
 
 func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("[%s] server invocation error [%s]: %s", s.id, s.inv.ID, string(body))
 	w.WriteHeader(http.StatusAccepted)
+
+	s.inv.ResponseCh <- invocation.Response{
+		StatusCode: http.StatusBadGateway,
+		Header:     nil,
+		Body:       body,
+		Error:      errors.New(string(body)),
+	}
+	close(s.inv.ResponseCh)
+	s.doneCh <- struct{}{}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.state = idle
 	s.inv = nil
-	s.errCh <- errors.New(string(body))
 }
 
 func (s *Server) serveInvocationResponse(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("[%s] server invocation response [%s]: %s", s.id, s.inv.ID, string(body))
 	w.WriteHeader(http.StatusAccepted)
 
 	s.inv.ResponseCh <- invocation.Response{
@@ -259,7 +265,7 @@ func (s *Server) serveInvocationResponse(w http.ResponseWriter, r *http.Request)
 		Error:      nil,
 	}
 	close(s.inv.ResponseCh)
-	s.errCh <- nil
+	s.doneCh <- struct{}{}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

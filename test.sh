@@ -11,14 +11,23 @@ pid=$!
 sleep 0.5
 
 function call() {
-  curl -s http://localhost:10000/2015-03-31/functions/${CRIE_LAMBDA_NAME}/invocations -d '{"call": "true"}' > /dev/null
+  # curl -s http://localhost:10000/2015-03-31/functions/${CRIE_LAMBDA_NAME}/invocations -d '{"call": "true"}' > /dev/null
+  AWS_DEFAULT_REGION=us-east-1 \
+  AWS_ACCESS_KEY_ID="id" \
+  AWS_SECRET_ACCESS_KEY="key" \
+  aws lambda invoke \
+      --function-name ${CRIE_LAMBDA_NAME} \
+      --endpoint-url http://localhost:10000 \
+      --cli-binary-format raw-in-base64-out \
+      --output json \
+      --payload '{"key": "value"}' \
+      /dev/null
+      # --debug \
 }
 
-call &
-call &
-call &
-call &
-call &
+for i in $(seq 1 5); do
+  call &
+done
 
 sleep 1
 
