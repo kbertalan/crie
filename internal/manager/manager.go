@@ -113,16 +113,29 @@ const (
 )
 
 func (p *managedProcess) Start() {
-	log.Printf("[%s] starting", p.id)
 	p.rapi.Start()
 	p.proc.Start()
 }
 
 func (p *managedProcess) Stop() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.waitForIdle()
 	p.proc.Stop()
 	p.rapi.Stop()
+}
+
+func (p *managedProcess) isIdle() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.status == idle
+}
+
+func (p *managedProcess) waitForIdle() {
+	for {
+		if p.isIdle() {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (p *managedProcess) TryHandle(ctx context.Context, inv invocation.Invocation) bool {
@@ -136,8 +149,7 @@ func (p *managedProcess) TryHandle(ctx context.Context, inv invocation.Invocatio
 	p.status = processing
 
 	go func() {
-		p.rapi.Start()
-		p.proc.Start()
+		p.Start()
 		err := p.rapi.Next(inv)
 		if err != nil {
 			log.Printf("[%s] invocation [%s] returned error: %+v", p.id, inv.ID, err)

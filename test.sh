@@ -11,7 +11,7 @@ pid=$!
 sleep 0.5
 
 function call() {
-  curl -s http://localhost:10000/2015-03-31/functions/${CRIE_LAMBDA_NAME}/invocations -d '"call"' > /dev/null
+  curl -s http://localhost:10000/2015-03-31/functions/${CRIE_LAMBDA_NAME}/invocations -d '{"call": "true"}' > /dev/null
 }
 
 call &

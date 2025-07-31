@@ -1,13 +1,10 @@
 package main
 
 import (
-	"time"
-
 	"github.com/aws/aws-lambda-go/lambda"
 )
 
-func echo(input string) (string, error) {
-	time.Sleep(500 * time.Millisecond)
+func echo(input any) (any, error) {
 	return input, nil
 }
 
