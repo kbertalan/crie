@@ -23,4 +23,4 @@ call &
 sleep 1
 
 kill $pid
-sleep 12
+wait %1

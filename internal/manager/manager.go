@@ -125,8 +125,8 @@ func (p *managedProcess) Start() {
 func (p *managedProcess) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.rapi.Stop()
 	p.proc.Stop()
+	p.rapi.Stop()
 }
 
 func (p *managedProcess) TryHandle(ctx context.Context, inv invocation.Invocation) bool {
