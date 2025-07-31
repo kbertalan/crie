@@ -31,12 +31,8 @@ func Processes(ctx context.Context, cfg config.Config, processCfgs []ProcessConf
 	for i, processCfg := range processCfgs {
 		address := cfg.ServerAddress.ProcessAddress(i)
 		p := managedProcess{
-			id: processCfg.ID,
-			rapi: rapi.NewServer(rapi.ServerConfig{
-				Config:  cfg,
-				ID:      processCfg.ID,
-				Address: address,
-			}),
+			id:   processCfg.ID,
+			rapi: rapi.NewServer(processCfg.ID, cfg, address),
 			proc: process.NewProcess(processCfg.ID, cfg, address),
 		}
 

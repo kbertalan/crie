@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 
 	"github.com/kbertalan/crie/internal/config"
@@ -44,12 +45,22 @@ func Delegate(ctx context.Context, cfg config.Config, cancel context.CancelFunc)
 }
 
 type Process struct {
-	id       string
-	cfg      config.Config
-	rapi     config.ListenAddress
-	cmd      *exec.Cmd
-	stopping bool
+	mu sync.Mutex
+
+	id   string
+	cfg  config.Config
+	rapi config.ListenAddress
+
+	cmd   *exec.Cmd
+	state processState
 }
+
+type processState int
+
+const (
+	stopped processState = iota
+	running
+)
 
 func NewProcess(id string, cfg config.Config, rapi config.ListenAddress) *Process {
 	return &Process{
@@ -61,9 +72,10 @@ func NewProcess(id string, cfg config.Config, rapi config.ListenAddress) *Proces
 }
 
 func (p *Process) Start() error {
-	p.stopping = false
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	if p.cmd != nil && p.cmd.ProcessState == nil {
+	if p.state == running && p.cmd != nil && p.cmd.ProcessState == nil {
 		return nil
 	}
 
@@ -80,12 +92,17 @@ func (p *Process) Start() error {
 		return err
 	}
 
+	p.state = running
 	log.Printf("[%s] process started", p.id)
 
 	go func() {
 		p.cmd.Wait()
 		log.Printf("[%s] process ended", p.id)
-		if !p.stopping {
+
+		p.mu.Lock()
+		state := p.state
+		p.mu.Unlock()
+		if state == running {
 			p.Start()
 		}
 	}()
@@ -94,15 +111,18 @@ func (p *Process) Start() error {
 }
 
 func (p *Process) Stop() {
-	if p.cmd == nil || p.cmd.ProcessState != nil {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.state == stopped || p.cmd == nil || p.cmd.ProcessState != nil {
 		return
 	}
-
-	p.stopping = true
 
 	if p.cmd.Process == nil {
 		return
 	}
+
+	p.state = stopped
 
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		log.Printf("[%s] process ended with error: %+v", p.id, err)

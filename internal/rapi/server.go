@@ -15,17 +15,14 @@ import (
 	"github.com/kbertalan/crie/internal/sender"
 )
 
-type ServerConfig struct {
-	Config  config.Config
-	ID      string
-	Address config.ListenAddress
-}
-
 type Server struct {
 	mu     sync.Mutex
 	ctx    context.Context
 	cancel context.CancelFunc
-	cfg    ServerConfig
+
+	id   string
+	cfg  config.Config
+	rapi config.ListenAddress
 
 	srv   *http.Server
 	state serverState
@@ -51,9 +48,11 @@ const (
 	LambdaRuntimeCognitoIdentity    = "Lambda-Runtime-Cognito-Identity"
 )
 
-func NewServer(cfg ServerConfig) *Server {
+func NewServer(id string, cfg config.Config, rapi config.ListenAddress) *Server {
 	return &Server{
+		id:    id,
 		cfg:   cfg,
+		rapi:  rapi,
 		ch:    make(chan struct{}, 1),
 		errCh: make(chan error, 1),
 	}
@@ -69,12 +68,12 @@ func (s *Server) Start() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /2018-06-01/runtime/invocation/next", s.serveNext)
-	mux.HandleFunc("POST /2018-06-01/runtime/init/error", s.serveNext)
+	mux.HandleFunc("POST /2018-06-01/runtime/init/error", s.serveInitializationError)
 	mux.HandleFunc("POST /2018-06-01/runtime/invocation/{requestId}/response", s.serveInvocationResponse)
 	mux.HandleFunc("POST /2018-06-01/runtime/invocation/{requestId}/error", s.serveInvocationError)
 
 	s.srv = &http.Server{
-		Addr:                         string(s.cfg.Address),
+		Addr:                         string(s.rapi),
 		Handler:                      mux,
 		DisableGeneralOptionsHandler: true,
 		ReadTimeout:                  0,
@@ -96,7 +95,7 @@ func (s *Server) Start() {
 			return
 		}
 
-		log.Printf("[%s] rapi.server stopped with error: %+v", s.cfg.ID, err)
+		log.Printf("[%s] rapi.server stopped with error: %+v", s.id, err)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
@@ -109,7 +108,7 @@ func (s *Server) Start() {
 	}()
 
 	s.state = idle
-	log.Printf("[%s] rapi.server started", s.cfg.ID)
+	log.Printf("[%s] rapi.server started", s.id)
 }
 
 func (s *Server) Stop() {
@@ -122,18 +121,18 @@ func (s *Server) Stop() {
 	s.cancel()
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Config.ServerShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ServerShutdownTimeout)
 	defer cancel()
 	err := s.srv.Shutdown(ctx)
 	if err != nil {
-		log.Printf("[%s] rapi.server shutdown returned error: %+v", s.cfg.ID, err)
+		log.Printf("[%s] rapi.server shutdown returned error: %+v", s.id, err)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.inv != nil {
-		log.Printf("[%s] rapi.server had a pending invocation [%s], sending error", s.cfg.ID, s.inv.ID)
+		log.Printf("[%s] rapi.server had a pending invocation [%s], sending error", s.id, s.inv.ID)
 		s.sendInvocationError(http.StatusInternalServerError, "server shutdown")
 	}
 
@@ -143,7 +142,7 @@ func (s *Server) Stop() {
 	close(s.ch)
 	close(s.errCh)
 
-	log.Printf("[%s] rapi.server stopped", s.cfg.ID)
+	log.Printf("[%s] rapi.server stopped", s.id)
 }
 
 func (s *Server) Next(inv invocation.Invocation) error {
@@ -188,7 +187,7 @@ func (s *Server) serveNext(w http.ResponseWriter, r *http.Request) {
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
-		log.Printf("[%s] sent next request [%s]", s.cfg.ID, s.inv.ID)
+		log.Printf("[%s] sent next request [%s]", s.id, s.inv.ID)
 	}
 }
 
@@ -214,10 +213,10 @@ func (s *Server) prepareLambdaHeaders(target http.Header) {
 	target.Add(LambdaRuntimeAwsRequestID, s.inv.ID.String())
 
 	target.Del(LambdaRuntimeDeadlineMs)
-	target.Add(LambdaRuntimeDeadlineMs, strconv.FormatInt(time.Now().Add(s.cfg.Config.LambdaRuntimeDeadline).UnixMilli(), 10))
+	target.Add(LambdaRuntimeDeadlineMs, strconv.FormatInt(time.Now().Add(s.cfg.LambdaRuntimeDeadline).UnixMilli(), 10))
 
 	target.Del(LambdaRuntimeInvokedFunctionArn)
-	target.Add(LambdaRuntimeInvokedFunctionArn, s.cfg.Config.LambdaRuntimeInvokedFunctionArn)
+	target.Add(LambdaRuntimeInvokedFunctionArn, s.cfg.LambdaRuntimeInvokedFunctionArn)
 
 	target.Del(LambdaRuntimeTraceId)
 	// TODO set trace id
@@ -231,13 +230,13 @@ func (s *Server) prepareLambdaHeaders(target http.Header) {
 
 func (s *Server) serveInitializationError(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("[%s] initialization error: %s", s.cfg.ID, string(body))
+	log.Printf("[%s] initialization error: %s", s.id, string(body))
 	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("[%s] server invocation error [%s]: %s", s.cfg.ID, s.inv.ID, string(body))
+	log.Printf("[%s] server invocation error [%s]: %s", s.id, s.inv.ID, string(body))
 	w.WriteHeader(http.StatusAccepted)
 
 	s.mu.Lock()
@@ -250,7 +249,7 @@ func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveInvocationResponse(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	log.Printf("[%s] server invocation response [%s]: %s", s.cfg.ID, s.inv.ID, string(body))
+	log.Printf("[%s] server invocation response [%s]: %s", s.id, s.inv.ID, string(body))
 	w.WriteHeader(http.StatusAccepted)
 
 	s.inv.ResponseCh <- invocation.Response{
