@@ -46,6 +46,7 @@ const (
 	LambdaRuntimeTraceId            = "Lambda-Runtime-Trace-Id"
 	LambdaRuntimeClientContext      = "Lambda-Runtime-Client-Context"
 	LambdaRuntimeCognitoIdentity    = "Lambda-Runtime-Cognito-Identity"
+	ContentType                     = "Content-Type"
 )
 
 func NewServer(id string, cfg config.Config, rapi config.ListenAddress) *Server {
@@ -226,6 +227,10 @@ func (s *Server) prepareLambdaHeaders(target http.Header) {
 
 	target.Del(LambdaRuntimeCognitoIdentity)
 	// TODO set cognito identity
+
+	if target.Get(ContentType) == "" {
+		target.Add(ContentType, "application/json")
+	}
 }
 
 func (s *Server) serveInitializationError(w http.ResponseWriter, r *http.Request) {
