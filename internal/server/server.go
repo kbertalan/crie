@@ -65,7 +65,7 @@ func (h *invokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case <-time.After(h.cfg.WaitForQueueCapacity):
 		close(inv.ResponseCh)
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(fmt.Sprintf(`{"message":"invocation queue is full: %s"}%s`, inv.ID, "\n")))
+		fmt.Fprintf(w, `{"message":"invocation queue is full: %s"}`, inv.ID)
 		return
 
 	case <-r.Context().Done():
@@ -94,18 +94,26 @@ func (h *invokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *invokeHandler) getResponse(inv invocation.Invocation) invocation.Response {
-
-	response, ok := <-inv.ResponseCh
-	if !ok {
-		log.Printf("[%s]: reponse channel was closed unexpectedly", inv.ID)
-		return invocation.Response{
-			StatusCode: http.StatusInternalServerError,
+	select {
+	case response, ok := <-inv.ResponseCh:
+		if !ok {
+			log.Printf("[%s]: reponse channel was closed unexpectedly", inv.ID)
+			return invocation.Response{
+				StatusCode: http.StatusInternalServerError,
+			}
 		}
-	}
 
-	if err := response.Error; err != nil {
-		log.Printf("[%s]: processing request failed: %+v", inv.ID, err)
-	}
+		if err := response.Error; err != nil {
+			log.Printf("[%s]: processing request failed: %+v", inv.ID, err)
+		}
+		return response
+	case <-time.After(h.cfg.LambdaRuntimeDeadline):
+		go func() {
+			<-inv.ResponseCh
+		}()
 
-	return response
+		resp := invocation.ResponseMessage(http.StatusBadGateway, "lambda timeout after %s", h.cfg.LambdaRuntimeDeadline)
+		resp.Error = fmt.Errorf("lambda timeout after %s", h.cfg.LambdaRuntimeDeadline)
+		return resp
+	}
 }

@@ -21,7 +21,7 @@ function call() {
       --cli-binary-format raw-in-base64-out \
       --output json \
       --payload '{"key": "value"}' \
-      /dev/null
+      /dev/null > /dev/null
       # --invocation-type Event \
       # --debug \
 }

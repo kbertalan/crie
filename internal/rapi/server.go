@@ -24,17 +24,20 @@ type Server struct {
 	cfg  config.Config
 	rapi config.ListenAddress
 
-	srv    *http.Server
-	state  serverState
-	inv    *invocation.Invocation
-	nextCh chan struct{}
-	doneCh chan struct{}
+	srv       *http.Server
+	state     serverState
+	inv       *invocation.Invocation
+	lastNext  time.Time
+	lastStart time.Time
+	nextCh    chan struct{}
+	doneCh    chan struct{}
 }
 
 type serverState int
 
 const (
 	stopped serverState = iota
+	initializing
 	idle
 	busy
 )
@@ -47,6 +50,7 @@ const (
 	LambdaRuntimeClientContext      = "Lambda-Runtime-Client-Context"
 	LambdaRuntimeCognitoIdentity    = "Lambda-Runtime-Cognito-Identity"
 	ContentType                     = "Content-Type"
+	ContentTypeApplicationJSON      = "application/json"
 )
 
 func NewServer(id string, cfg config.Config, rapi config.ListenAddress) *Server {
@@ -86,6 +90,7 @@ func (s *Server) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.ctx = ctx
 	s.cancel = cancel
+	s.lastStart = time.Now()
 
 	go func() {
 		err := s.srv.ListenAndServe()
@@ -108,7 +113,7 @@ func (s *Server) Start() {
 		s.inv = nil
 	}()
 
-	s.state = idle
+	s.state = initializing
 	log.Printf("[%s] rapi.server started", s.id)
 }
 
@@ -116,6 +121,7 @@ func (s *Server) Stop() {
 	s.mu.Lock()
 
 	if s.srv == nil || s.state == stopped {
+		s.mu.Unlock()
 		return
 	}
 
@@ -148,7 +154,6 @@ func (s *Server) Stop() {
 
 func (s *Server) Next(inv invocation.Invocation) {
 	s.mu.Lock()
-	s.state = busy
 	s.inv = &inv
 	s.nextCh <- struct{}{}
 	s.mu.Unlock()
@@ -166,6 +171,13 @@ func (s *Server) sendInvocationError(status int, format string, args ...any) {
 }
 
 func (s *Server) serveNext(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.state == initializing {
+		log.Printf("[%s] initialization took %s", s.id, time.Since(s.lastStart))
+		s.state = idle
+	}
+	s.mu.Unlock()
+
 	ctx := r.Context()
 	select {
 	case <-ctx.Done():
@@ -178,6 +190,11 @@ func (s *Server) serveNext(w http.ResponseWriter, r *http.Request) {
 			sender.SendMessage(w, http.StatusNotFound, "no more invocations")
 			return
 		}
+
+		s.mu.Lock()
+		s.state = busy
+		s.lastNext = time.Now()
+		s.mu.Unlock()
 
 		target := w.Header()
 		s.copyHeadersFromInvocation(target)
@@ -229,7 +246,7 @@ func (s *Server) prepareLambdaHeaders(target http.Header) {
 	// TODO set cognito identity
 
 	if target.Get(ContentType) == "" {
-		target.Add(ContentType, "application/json")
+		target.Add(ContentType, ContentTypeApplicationJSON)
 	}
 }
 
@@ -255,16 +272,16 @@ func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 			Error:      errors.New(string(body)),
 		}
 
-		log.Printf("[%s] invocation [%s] failed", s.id, s.inv.ID)
+		log.Printf("[%s] invocation [%s] failed after %s", s.id, s.inv.ID, time.Since(s.lastNext))
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 
 		resp := invocation.ResponseMessage(http.StatusInternalServerError, "could not read lambda invocation error response")
 		resp.Error = err
 
-		log.Printf("[%s] could not read invocation [%s] error response: %+v", s.id, s.inv.ID, err)
-
 		s.inv.ResponseCh <- resp
+
+		log.Printf("[%s] could not read invocation [%s] error response: %+v", s.id, s.inv.ID, err)
 	}
 
 	close(s.inv.ResponseCh)
@@ -288,16 +305,16 @@ func (s *Server) serveInvocationResponse(w http.ResponseWriter, r *http.Request)
 			Error:      nil,
 		}
 
-		log.Printf("[%s] invocation [%s] completed", s.id, s.inv.ID)
+		log.Printf("[%s] invocation [%s] completed in %s", s.id, s.inv.ID, time.Since(s.lastNext))
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 
 		resp := invocation.ResponseJSON(http.StatusInternalServerError, "cannot read lambda invocation response")
 		resp.Error = err
 
-		log.Printf("[%s] could not read invocation [%s] response: %+v", s.id, s.inv.ID, err)
-
 		s.inv.ResponseCh <- resp
+
+		log.Printf("[%s] could not read invocation [%s] response: %+v", s.id, s.inv.ID, err)
 	}
 
 	close(s.inv.ResponseCh)
