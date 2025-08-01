@@ -21,6 +21,14 @@ type Response struct {
 	Error      error       `json:"-"`
 }
 
+const (
+	XAmzInvocationType = "X-Amz-Invocation-Type"
+
+	InvocationTypeEvent           = "Event"
+	InvocationTypeRequestResponse = "RequestResponse"
+	InvocationTypeDryRun          = "DryRun"
+)
+
 type Invocation struct {
 	ID      uuid.UUID
 	Request `json:"request"`
@@ -51,14 +59,8 @@ func FromHTTPRequest(r *http.Request) (Invocation, error) {
 	return invocation, nil
 }
 
-func (i *Invocation) Close() error {
-	if i == nil {
-		return nil
-	}
-
-	close(i.ResponseCh)
-
-	return nil
+func (i Invocation) IsEvent() bool {
+	return i.Request.Header.Get(XAmzInvocationType) == InvocationTypeEvent
 }
 
 func ResponseJSON(status int, value any) Response {
@@ -87,7 +89,7 @@ func ResponseMessage(status int, format string, args ...any) Response {
 		Header: http.Header{
 			"content-type": []string{"application/json"},
 		},
-		Body:  []byte(fmt.Sprintf(`{"message": "%s"}%s`, formatted, "\n")),
+		Body:  fmt.Appendf(nil, `{"message": "%s"}%s`, formatted, "\n"),
 		Error: nil,
 	}
 }

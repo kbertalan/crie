@@ -22,6 +22,7 @@ function call() {
       --output json \
       --payload '{"key": "value"}' \
       /dev/null
+      # --invocation-type Event \
       # --debug \
 }
 

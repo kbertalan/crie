@@ -74,12 +74,13 @@ func (h *invokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, ok := <-inv.ResponseCh
-	if !ok {
-		log.Printf("[%s]: reponse channel was closed unexpectedly", inv.ID)
-		w.WriteHeader(http.StatusInternalServerError)
+	if inv.IsEvent() {
+		w.WriteHeader(http.StatusAccepted)
+		go h.getResponse(inv)
 		return
 	}
+
+	response := h.getResponse(inv)
 
 	for name, values := range response.Header {
 		w.Header().Del(name)
@@ -88,10 +89,23 @@ func (h *invokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	w.WriteHeader(response.StatusCode)
+	w.Write(response.Body)
+}
+
+func (h *invokeHandler) getResponse(inv invocation.Invocation) invocation.Response {
+
+	response, ok := <-inv.ResponseCh
+	if !ok {
+		log.Printf("[%s]: reponse channel was closed unexpectedly", inv.ID)
+		return invocation.Response{
+			StatusCode: http.StatusInternalServerError,
+		}
+	}
+
 	if err := response.Error; err != nil {
 		log.Printf("[%s]: processing request failed: %+v", inv.ID, err)
 	}
 
-	w.WriteHeader(response.StatusCode)
-	w.Write(response.Body)
+	return response
 }

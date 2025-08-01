@@ -234,21 +234,39 @@ func (s *Server) prepareLambdaHeaders(target http.Header) {
 }
 
 func (s *Server) serveInitializationError(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("[%s] could not read initialization error response: %+v", s.id, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	log.Printf("[%s] initialization error: %s", s.id, string(body))
 	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
-	w.WriteHeader(http.StatusAccepted)
+	if body, err := io.ReadAll(r.Body); err == nil {
+		w.WriteHeader(http.StatusAccepted)
 
-	s.inv.ResponseCh <- invocation.Response{
-		StatusCode: http.StatusBadGateway,
-		Header:     nil,
-		Body:       body,
-		Error:      errors.New(string(body)),
+		s.inv.ResponseCh <- invocation.Response{
+			StatusCode: http.StatusBadGateway,
+			Header:     nil,
+			Body:       body,
+			Error:      errors.New(string(body)),
+		}
+
+		log.Printf("[%s] invocation [%s] failed", s.id, s.inv.ID)
+	} else {
+		w.WriteHeader(http.StatusInternalServerError)
+
+		resp := invocation.ResponseMessage(http.StatusInternalServerError, "could not read lambda invocation error response")
+		resp.Error = err
+
+		log.Printf("[%s] could not read invocation [%s] error response: %+v", s.id, s.inv.ID, err)
+
+		s.inv.ResponseCh <- resp
 	}
+
 	close(s.inv.ResponseCh)
 	s.doneCh <- struct{}{}
 
@@ -260,15 +278,28 @@ func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveInvocationResponse(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
-	w.WriteHeader(http.StatusAccepted)
+	if body, err := io.ReadAll(r.Body); err == nil {
+		w.WriteHeader(http.StatusAccepted)
 
-	s.inv.ResponseCh <- invocation.Response{
-		StatusCode: http.StatusOK,
-		Header:     nil,
-		Body:       body,
-		Error:      nil,
+		s.inv.ResponseCh <- invocation.Response{
+			StatusCode: http.StatusOK,
+			Header:     nil,
+			Body:       body,
+			Error:      nil,
+		}
+
+		log.Printf("[%s] invocation [%s] completed", s.id, s.inv.ID)
+	} else {
+		w.WriteHeader(http.StatusInternalServerError)
+
+		resp := invocation.ResponseJSON(http.StatusInternalServerError, "cannot read lambda invocation response")
+		resp.Error = err
+
+		log.Printf("[%s] could not read invocation [%s] response: %+v", s.id, s.inv.ID, err)
+
+		s.inv.ResponseCh <- resp
 	}
+
 	close(s.inv.ResponseCh)
 	s.doneCh <- struct{}{}
 
