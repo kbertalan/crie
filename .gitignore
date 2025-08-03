@@ -7,3 +7,5 @@
 tmp/
 crie
 echo-lambda
+# Added by goreleaser init:
+dist/

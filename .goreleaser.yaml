@@ -1,0 +1,48 @@
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+version: 2
+
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env: []
+    main: ./cmd/crie/crie.go
+    flags:
+      - -trimpath
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}_v{{ .Version }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+
+checksum:
+  algorithm: sha256
+  split: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+
+release:
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
+
+  draft: true
