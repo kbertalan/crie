@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/kbertalan/crie/internal/config"
 )
@@ -52,8 +53,9 @@ type Process struct {
 	cfg  config.Config
 	rapi config.ListenAddress
 
-	cmd   *exec.Cmd
-	state processState
+	cmd    *exec.Cmd
+	state  processState
+	doneCh chan struct{}
 }
 
 type processState int
@@ -104,11 +106,13 @@ func (p *Process) Start() error {
 		return err
 	}
 
+	p.doneCh = make(chan struct{})
 	p.state = running
 	log.Printf("[%s] process started", p.id)
 
 	go func() {
 		p.cmd.Wait()
+		close(p.doneCh)
 		log.Printf("[%s] process ended", p.id)
 
 		p.mu.Lock()
@@ -123,21 +127,46 @@ func (p *Process) Start() error {
 }
 
 func (p *Process) Stop() {
+	if !p.sendTermSignal() {
+		return
+	}
+
+	select {
+	case <-p.doneCh:
+	case <-time.After(p.cfg.ProcessShutdownTimeout):
+		log.Printf("[%s] process did not exit after SIGTERM, sending SIGKILL", p.id)
+		p.sendKillSignal()
+		<-p.doneCh
+	}
+}
+
+func (p *Process) sendTermSignal() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.state == stopped {
-		return
+		return false
 	}
 
 	p.state = stopped
 
 	if p.cmd == nil || p.cmd.Process == nil || p.cmd.ProcessState != nil {
-		return
+		return false
 	}
 
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		log.Printf("[%s] process ended with error: %+v", p.id, err)
-		return
+		log.Printf("[%s] process signal failed: %+v", p.id, err)
+		return false
+	}
+
+	return true
+}
+
+func (p *Process) sendKillSignal() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.cmd != nil && p.cmd.Process != nil && p.cmd.ProcessState == nil {
+		p.cmd.Process.Kill()
 	}
 }

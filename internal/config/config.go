@@ -23,6 +23,7 @@ type Config struct {
 	MaxHandleAttempts               uint32
 	DelayBetweenHandleAttempts      time.Duration
 	RAPIServerShutdownTimeout       time.Duration
+	ProcessShutdownTimeout          time.Duration
 	LambdaRuntimeDeadline           time.Duration
 	LambdaRuntimeInvokedFunctionArn string
 	MaxBodySize                     int64
@@ -40,6 +41,7 @@ const (
 	CRIE_MAX_HANDLE_ATTEMPTS                 = "CRIE_MAX_HANDLE_ATTEMPTS"
 	CRIE_DELAY_BETWEEN_HANDLE_ATTEMPTS       = "CRIE_DELAY_BETWEEN_HANDLE_ATTEMPTS"
 	CRIE_RAPI_SERVER_SHUTDOWN_TIMEOUT        = "CRIE_RAPI_SERVER_SHUTDOWN_TIMEOUT"
+	CRIE_PROCESS_SHUTDOWN_TIMEOUT            = "CRIE_PROCESS_SHUTDOWN_TIMEOUT"
 	CRIE_LAMBDA_RUNTIME_DEADLINE             = "CRIE_LAMBDA_RUNTIME_DEADLINE"
 	CRIE_LAMBDA_RUNTIME_INVOKED_FUNCTION_ARN = "CRIE_LAMBDA_RUNTIME_INVOKED_FUNCTION_ARN"
 	CRIE_MAX_BODY_SIZE                       = "CRIE_MAX_BODY_SIZE"
@@ -54,6 +56,7 @@ const (
 	defaultMaxHandleAttempts              uint32        = 100
 	defaultDelayBetweenHandleAttempts     time.Duration = 100 * time.Millisecond
 	defaultRAPIServerShutdownTimeout      time.Duration = 9 * time.Second
+	defaultProcessShutdownTimeout         time.Duration = 5 * time.Second
 	defaultLambdaRuntimeDeadline          time.Duration = 90 * time.Second
 	defaultLambdaRuntimeInvokedFunctionArn string        = "arn:aws:lambda:us-east-2:123456789012:function:custom-runtime"
 	defaultMaxBodySize                    int64         = 6 * 1024 * 1024 // 6 MB — AWS Lambda payload limit
@@ -123,6 +126,15 @@ func Detect() (Config, error) {
 
 	if cfg.RAPIServerShutdownTimeout >= cfg.ServerShutdownTimeout {
 		return cfg, fmt.Errorf("rapi.server shutdown timeout (%s) must be lower than server shutdown timeout (%s)", cfg.RAPIServerShutdownTimeout, cfg.ServerShutdownTimeout)
+	}
+
+	cfg.ProcessShutdownTimeout, err = parseEnv(CRIE_PROCESS_SHUTDOWN_TIMEOUT, defaultProcessShutdownTimeout, time.ParseDuration)
+	if err != nil {
+		return cfg, err
+	}
+
+	if cfg.ProcessShutdownTimeout >= cfg.RAPIServerShutdownTimeout {
+		return cfg, fmt.Errorf("process shutdown timeout (%s) must be lower than rapi.server shutdown timeout (%s)", cfg.ProcessShutdownTimeout, cfg.RAPIServerShutdownTimeout)
 	}
 
 	cfg.LambdaRuntimeDeadline, err = parseEnv(CRIE_LAMBDA_RUNTIME_DEADLINE, defaultLambdaRuntimeDeadline, time.ParseDuration)
