@@ -25,6 +25,7 @@ type Config struct {
 	RAPIServerShutdownTimeout       time.Duration
 	LambdaRuntimeDeadline           time.Duration
 	LambdaRuntimeInvokedFunctionArn string
+	MaxBodySize                     int64
 }
 
 const (
@@ -41,6 +42,7 @@ const (
 	CRIE_RAPI_SERVER_SHUTDOWN_TIMEOUT        = "CRIE_RAPI_SERVER_SHUTDOWN_TIMEOUT"
 	CRIE_LAMBDA_RUNTIME_DEADLINE             = "CRIE_LAMBDA_RUNTIME_DEADLINE"
 	CRIE_LAMBDA_RUNTIME_INVOKED_FUNCTION_ARN = "CRIE_LAMBDA_RUNTIME_INVOKED_FUNCTION_ARN"
+	CRIE_MAX_BODY_SIZE                       = "CRIE_MAX_BODY_SIZE"
 
 	defaultMaxConcurrency                 uint32        = 2
 	defaultInitialConcurrency             uint32        = 1
@@ -53,7 +55,8 @@ const (
 	defaultDelayBetweenHandleAttempts     time.Duration = 100 * time.Millisecond
 	defaultRAPIServerShutdownTimeout      time.Duration = 9 * time.Second
 	defaultLambdaRuntimeDeadline          time.Duration = 90 * time.Second
-	defaultLambdaRuntimeInvokedFuntionArn string        = "arn:aws:lambda:us-east-2:123456789012:function:custom-runtime"
+	defaultLambdaRuntimeInvokedFunctionArn string        = "arn:aws:lambda:us-east-2:123456789012:function:custom-runtime"
+	defaultMaxBodySize                    int64         = 6 * 1024 * 1024 // 6 MB — AWS Lambda payload limit
 )
 
 func Detect() (Config, error) {
@@ -131,7 +134,12 @@ func Detect() (Config, error) {
 		return cfg, fmt.Errorf("lambda runtime deadline cannot be higher than 15 minutes, but it was %s", cfg.LambdaRuntimeDeadline)
 	}
 
-	cfg.LambdaRuntimeInvokedFunctionArn = getEnv(CRIE_LAMBDA_RUNTIME_INVOKED_FUNCTION_ARN, defaultLambdaRuntimeInvokedFuntionArn)
+	cfg.LambdaRuntimeInvokedFunctionArn = getEnv(CRIE_LAMBDA_RUNTIME_INVOKED_FUNCTION_ARN, defaultLambdaRuntimeInvokedFunctionArn)
+
+	cfg.MaxBodySize, err = parseEnvInt64(CRIE_MAX_BODY_SIZE, defaultMaxBodySize)
+	if err != nil {
+		return cfg, err
+	}
 
 	return cfg, nil
 }

@@ -35,6 +35,7 @@ func Processes(ctx context.Context, cfg config.Config, processCfgs []ProcessConf
 			rapi: rapi.NewServer(processCfg.ID, cfg, address),
 			proc: process.NewProcess(processCfg.ID, cfg, address),
 		}
+		p.cond = sync.NewCond(&p.mu)
 
 		if processCfg.Start {
 			p.Start()
@@ -98,10 +99,12 @@ func (m *mgr) Close() {
 }
 
 type managedProcess struct {
-	mu     sync.Mutex
-	id     string
-	rapi   *rapi.Server
-	proc   *process.Process
+	mu   sync.Mutex
+	cond *sync.Cond
+	id   string
+	rapi *rapi.Server
+	proc *process.Process
+
 	status managedProcessStatus
 }
 
@@ -123,18 +126,11 @@ func (p *managedProcess) Stop() {
 	p.rapi.Stop()
 }
 
-func (p *managedProcess) isIdle() bool {
+func (p *managedProcess) waitForIdle() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.status == idle
-}
-
-func (p *managedProcess) waitForIdle() {
-	for {
-		if p.isIdle() {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
+	for p.status != idle {
+		p.cond.Wait()
 	}
 }
 
@@ -155,6 +151,7 @@ func (p *managedProcess) TryHandle(ctx context.Context, inv invocation.Invocatio
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		p.status = idle
+		p.cond.Signal()
 	}()
 	return true
 }

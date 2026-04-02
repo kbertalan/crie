@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -58,7 +59,8 @@ type Process struct {
 type processState int
 
 const (
-	stopped processState = iota
+	idle processState = iota
+	stopped
 	running
 )
 
@@ -75,12 +77,22 @@ func (p *Process) Start() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.state == stopped {
+		return errors.New("already stopped")
+	}
+
 	if p.state == running && p.cmd != nil && p.cmd.ProcessState == nil {
 		return nil
 	}
 
 	p.cmd = exec.Command(p.cfg.CommandName, p.cfg.CommandArgs...)
-	p.cmd.Stdin = os.Stdin
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		log.Printf("[%s] cannot open devnull: %+v", p.id, err)
+		return err
+	}
+	defer devNull.Close()
+	p.cmd.Stdin = devNull
 	p.cmd.Stdout = os.Stdout
 	p.cmd.Stderr = os.Stderr
 
@@ -114,15 +126,15 @@ func (p *Process) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state == stopped || p.cmd == nil || p.cmd.ProcessState != nil {
-		return
-	}
-
-	if p.cmd.Process == nil {
+	if p.state == stopped {
 		return
 	}
 
 	p.state = stopped
+
+	if p.cmd == nil || p.cmd.Process == nil || p.cmd.ProcessState != nil {
+		return
+	}
 
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		log.Printf("[%s] process ended with error: %+v", p.id, err)

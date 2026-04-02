@@ -45,6 +45,12 @@ func parseEnvInt(key string, defaultValue int) (int, error) {
 	})
 }
 
+func parseEnvInt64(key string, defaultValue int64) (int64, error) {
+	return parseEnv(key, defaultValue, func(valueStr string) (int64, error) {
+		return strconv.ParseInt(valueStr, 10, 64)
+	})
+}
+
 func parseEnvListenAddress(key string, defaultValue ListenAddress) (ListenAddress, error) {
 	return parseEnv(key, defaultValue, func(valueStr string) (ListenAddress, error) {
 		_, _, err := net.SplitHostPort(valueStr)

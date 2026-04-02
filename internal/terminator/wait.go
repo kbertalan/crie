@@ -11,7 +11,7 @@ func Wait(ctx context.Context, cancel context.CancelFunc) {
 	defer cancel()
 
 	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGKILL, syscall.SIGTERM)
+	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 
 	select {
 	case <-signalCh:

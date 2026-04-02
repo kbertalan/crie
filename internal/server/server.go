@@ -52,7 +52,7 @@ type invokeHandler struct {
 }
 
 func (h *invokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	inv, err := invocation.FromHTTPRequest(r)
+	inv, err := invocation.FromHTTPRequest(r, h.cfg.MaxBodySize)
 	if err != nil {
 		log.Printf("cannot construct invocation from request: %+v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -109,7 +109,10 @@ func (h *invokeHandler) getResponse(inv invocation.Invocation) invocation.Respon
 		return response
 	case <-time.After(h.cfg.LambdaRuntimeDeadline):
 		go func() {
-			<-inv.ResponseCh
+			select {
+			case <-inv.ResponseCh:
+			case <-time.After(h.cfg.LambdaRuntimeDeadline):
+			}
 		}()
 
 		resp := invocation.ResponseMessage(http.StatusBadGateway, "lambda timeout after %s", h.cfg.LambdaRuntimeDeadline)

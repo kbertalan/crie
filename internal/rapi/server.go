@@ -55,11 +55,9 @@ const (
 
 func NewServer(id string, cfg config.Config, rapi config.ListenAddress) *Server {
 	return &Server{
-		id:     id,
-		cfg:    cfg,
-		rapi:   rapi,
-		nextCh: make(chan struct{}, 1),
-		doneCh: make(chan struct{}, 1),
+		id:   id,
+		cfg:  cfg,
+		rapi: rapi,
 	}
 }
 
@@ -91,13 +89,15 @@ func (s *Server) Start() {
 	s.ctx = ctx
 	s.cancel = cancel
 	s.lastStart = time.Now()
+	s.nextCh = make(chan struct{}, 1)
+	s.doneCh = make(chan struct{}, 1)
 
 	go func() {
 		err := s.srv.ListenAndServe()
 		if err == nil {
 			return
 		}
-		if errors.Is(http.ErrServerClosed, err) {
+		if errors.Is(err, http.ErrServerClosed) {
 			return
 		}
 
@@ -146,8 +146,6 @@ func (s *Server) Stop() {
 	s.srv = nil
 	s.state = stopped
 	s.inv = nil
-	close(s.nextCh)
-	close(s.doneCh)
 
 	log.Printf("[%s] rapi.server stopped", s.id)
 }
@@ -158,7 +156,10 @@ func (s *Server) Next(inv invocation.Invocation) {
 	s.nextCh <- struct{}{}
 	s.mu.Unlock()
 
-	<-s.doneCh
+	select {
+	case <-s.ctx.Done():
+	case <-s.doneCh:
+	}
 }
 
 func (s *Server) sendInvocationError(status int, format string, args ...any) {
@@ -192,9 +193,9 @@ func (s *Server) serveNext(w http.ResponseWriter, r *http.Request) {
 		}
 
 		s.mu.Lock()
+		defer s.mu.Unlock()
 		s.state = busy
 		s.lastNext = time.Now()
-		s.mu.Unlock()
 
 		target := w.Header()
 		s.copyHeadersFromInvocation(target)
@@ -262,6 +263,12 @@ func (s *Server) serveInitializationError(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
+	if s.inv == nil {
+		sender.SendMessage(w, http.StatusBadRequest, "no active invocation")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodySize)
 	if body, err := io.ReadAll(r.Body); err == nil {
 		w.WriteHeader(http.StatusAccepted)
 
@@ -295,6 +302,12 @@ func (s *Server) serveInvocationError(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveInvocationResponse(w http.ResponseWriter, r *http.Request) {
+	if s.inv == nil {
+		sender.SendMessage(w, http.StatusBadRequest, "no active invocation")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodySize)
 	if body, err := io.ReadAll(r.Body); err == nil {
 		w.WriteHeader(http.StatusAccepted)
 

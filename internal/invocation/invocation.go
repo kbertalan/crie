@@ -36,7 +36,7 @@ type Invocation struct {
 	ResponseCh chan Response `json:"-"`
 }
 
-func FromHTTPRequest(r *http.Request) (Invocation, error) {
+func FromHTTPRequest(r *http.Request, maxBodySize int64) (Invocation, error) {
 	var invocation Invocation
 
 	id, err := uuid.NewRandom()
@@ -46,11 +46,11 @@ func FromHTTPRequest(r *http.Request) (Invocation, error) {
 
 	invocation.ID = id
 
-	body, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize))
 	if err != nil {
 		return invocation, err
 	}
-	defer r.Body.Close()
 
 	invocation.Request.Body = body
 	invocation.Request.Header = r.Header
@@ -84,12 +84,13 @@ func ResponseJSON(status int, value any) Response {
 
 func ResponseMessage(status int, format string, args ...any) Response {
 	formatted := fmt.Sprintf(format, args...)
+	body, _ := json.Marshal(map[string]string{"message": formatted})
 	return Response{
 		StatusCode: status,
 		Header: http.Header{
 			"content-type": []string{"application/json"},
 		},
-		Body:  fmt.Appendf(nil, `{"message": "%s"}%s`, formatted, "\n"),
+		Body:  body,
 		Error: nil,
 	}
 }
