@@ -1,36 +1,31 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-(cd ./test/echo; go build -o ../../echo-lambda main.go)
-go build -o crie ./cmd/crie/crie.go
+CONCURRENCY="${1:-5}"
+NETWORK="crie-test"
 
-export CRIE_LAMBDA_NAME='my-function'
-export CRIE_QUEUE_SIZE=2
-./crie ./echo-lambda &
-pid=$!
-
-sleep 0.5
-
-function call() {
-  # curl -s http://localhost:10000/2015-03-31/functions/${CRIE_LAMBDA_NAME}/invocations -d '{"call": "true"}' > /dev/null
-  AWS_DEFAULT_REGION=us-east-1 \
-  AWS_ACCESS_KEY_ID="id" \
-  AWS_SECRET_ACCESS_KEY="key" \
-  aws lambda invoke \
-      --function-name ${CRIE_LAMBDA_NAME} \
-      --endpoint-url http://localhost:10000 \
-      --cli-binary-format raw-in-base64-out \
-      --output json \
-      --payload '{"key": "value"}' \
-      /dev/null > /dev/null
-      # --invocation-type Event \
-      # --debug \
+cleanup() {
+  echo "cleaning up..."
+  docker rm -f crie-server 2>/dev/null || true
+  docker network rm "$NETWORK" 2>/dev/null || true
 }
+trap cleanup EXIT
 
-for i in $(seq 1 5); do
-  call &
-done
+echo "building crie server image..."
+docker build -t crie-server -f test/echo/Dockerfile .
 
+echo "building test client image..."
+docker build -t crie-client -f test/client/Dockerfile .
+
+docker network create "$NETWORK" 2>/dev/null || true
+
+echo "starting crie server..."
+docker run -d --rm --name crie-server --network "$NETWORK" --network-alias crie crie-server
+
+echo "waiting for crie server to be ready..."
 sleep 1
 
-kill $pid
-wait %1
+echo "running test client with concurrency=${CONCURRENCY}..."
+docker run --rm --network "$NETWORK" -e "CLIENT_CONCURRENCY=${CONCURRENCY}" crie-client
+
+echo "test complete"
