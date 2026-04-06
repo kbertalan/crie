@@ -30,6 +30,7 @@ func main() {
 
 func emulate(cfg config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
+	go terminator.ReapZombies(ctx)
 	var wg sync.WaitGroup
 
 	invocationCh := make(chan invocation.Invocation, cfg.QueueSize)
@@ -59,6 +60,7 @@ func emulate(cfg config.Config) {
 
 func delegate(cfg config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
+	go terminator.ReapZombies(ctx)
 	process.Delegate(ctx, cfg, cancel)
 	terminator.Wait(ctx, cancel)
 }
