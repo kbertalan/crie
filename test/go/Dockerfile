@@ -1,9 +1,9 @@
 FROM golang:1.24 AS build-echo
 WORKDIR /src
-COPY test/echo/go.mod test/echo/go.sum ./test/echo/
-RUN cd test/echo && go mod download
-COPY test/echo/ ./test/echo/
-RUN cd test/echo && CGO_ENABLED=0 go build -o /echo-lambda main.go
+COPY test/go/go.mod test/go/go.sum .
+RUN go mod download
+COPY test/go/ .
+RUN CGO_ENABLED=0 go build -o /echo-lambda main.go
 
 FROM golang:1.24 AS build-crie
 WORKDIR /src

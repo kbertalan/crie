@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONCURRENCY="${1:-5}"
+IMPL="${1:-go}"
+if [ "$IMPL" != "go" ] && [ "$IMPL" != "python" ]; then
+  echo "Error: Unknown implementation '$IMPL'. Use 'go' or 'python'." >&2
+  exit 1
+fi
+
+CONCURRENCY="${2:-5}"
 NETWORK="crie-test"
 
 cleanup() {
@@ -11,8 +17,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "building crie server image..."
-docker build -t crie-server -f test/echo/Dockerfile .
+echo "building crie server image ($IMPL)..."
+docker build -t crie-server -f test/$IMPL/Dockerfile .
 
 echo "building test client image..."
 docker build -t crie-client -f test/client/Dockerfile .
