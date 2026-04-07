@@ -70,3 +70,25 @@ crie operates in two modes depending on whether the `AWS_LAMBDA_RUNTIME_API` env
 2. The Lambda Process communicates directly with the real AWS Lambda Runtime API — crie does not intercept or proxy these calls.
 3. crie only provides zombie reaping (via SIGCHLD handling) and signal forwarding (SIGTERM/SIGINT trigger process termination).
 4. When the child process exits, crie exits.
+
+## Environment Variables
+
+crie supports the following environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWS_LAMBDA_RUNTIME_API` | - | When set, crie operates in delegate mode, passing through to the real AWS Lambda Runtime API. Without it, crie runs in emulate mode. |
+| `CRIE_MAX_CONCURRENCY` | 2 | Maximum number of concurrent Lambda processes allowed. |
+| `CRIE_INITIAL_CONCURRENCY` | 1 | Initial number of concurrent Lambda processes at startup. |
+| `CRIE_QUEUE_SIZE` | 1000 | Size of the invocation queue for buffering requests. |
+| `CRIE_WAIT_FOR_QUEUE_CAPACITY` | 100ms | Duration to wait when the invocation queue is at capacity. |
+| `CRIE_SERVER_ADDRESS` | :10000 | TCP address for the crie server to listen on. |
+| `CRIE_SERVER_SHUTDOWN_TIMEOUT` | 10s | Timeout for graceful shutdown of the main server. |
+| `CRIE_LAMBDA_NAME` | function | Name of the Lambda function. |
+| `CRIE_MAX_HANDLE_ATTEMPTS` | 100 | Maximum attempts to handle an invocation before failing. |
+| `CRIE_DELAY_BETWEEN_HANDLE_ATTEMPTS` | 100ms | Delay between consecutive handle attempts. |
+| `CRIE_RAPI_SERVER_SHUTDOWN_TIMEOUT` | 9s | Timeout for graceful shutdown of the RAPI server. |
+| `CRIE_PROCESS_SHUTDOWN_TIMEOUT` | 5s | Timeout for process shutdown. |
+| `CRIE_LAMBDA_RUNTIME_DEADLINE` | 90s | Maximum duration for Lambda runtime execution (must not exceed 15 minutes). |
+| `CRIE_LAMBDA_RUNTIME_INVOKED_FUNCTION_ARN` | arn:aws:lambda:us-east-2:123456789012:function:custom-runtime | ARN of the invoked function. |
+| `CRIE_MAX_BODY_SIZE` | 6MB | Maximum request body size (AWS Lambda payload limit). |
