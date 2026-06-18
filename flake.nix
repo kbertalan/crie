@@ -34,6 +34,10 @@
 
             # aws
             awscli2
+
+            # infra
+            opentofu
+            tofu-ls
           ];
 
           shellHook = ''
