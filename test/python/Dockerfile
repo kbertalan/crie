@@ -1,4 +1,4 @@
-FROM golang:1.24 AS build-crie
+FROM golang:1.26 AS build-crie
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -8,7 +8,7 @@ COPY internal/ ./internal/
 RUN CGO_ENABLED=0 go build -o /crie ./cmd/crie/crie.go
 
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 RUN pip install awslambdaric

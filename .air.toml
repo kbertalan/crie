@@ -4,7 +4,7 @@ tmp_dir = "tmp"
 
 [build]
   args_bin = []
-  bin = "./tmp/server"
+  entrypoint = ["./tmp/server"]
   delay = 200
   exclude_dir = ["assets", "tmp", "vendor", "testdata"]
   exclude_file = []
